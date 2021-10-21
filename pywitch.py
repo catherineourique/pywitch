@@ -7,37 +7,32 @@ import requests
 import threading
 
 __validate_token_url__ = 'https://id.twitch.tv/oauth2/validate'
+__pywitch_client_id__ = 'l2o6fudb8tq6394phgudstdzlouo9n'
 
 get_token_url = (
     'https://id.twitch.tv/oauth2/authorize?'
     'response_type=token&'
-    'client_id=YOUR_CLIENT_ID&'
+    f'client_id={__pywitch_client_id__}&'
     'redirect_uri=http://localhost&'
-    'scope=channel:manage:redemptions channel:read:redemptions '
-    'user:read:email chat:edit chat:read'
+    'scope=channel:manage:redemptions%20channel:read:redemptions%20'
+    'user:read:email%20chat:edit%20chat:read'
 )
 
 response_token_url = (
-    'http://localhost/#access_token=YOUR_ACCESS_TOKEN&'
+    'https://localhost/#access_token=YOUR_ACCESS_TOKEN&'
     'scope=channel%3Amanage%3Aredemptions+channel%3Aread%3Aredemptions+user%'
     '3Aread%3Aemail+chat%3Aedit+chat%3Aread&token_type=bearer'
 )
 
 no_token_msg = f"""ERROR: No token provided!
 
-To generate token, you first need to create a Twitch Application in the
+To generate token, you need to authenticate PyWitch application in the
 following URL:
-https://dev.twitch.tv
-
-Login with your Twitch Account, click "Your Console", then "Applications" and
-"Register Your Application".
-Give it a pretty name and set OAuth Redirect URLs as "http://localhost", and
-set Category to any of the given options.
-After that, your application will receive an "Client ID", keep that in hands.
-
-Now you need to access the following URL with your "Client ID" in your
-browser:
 {get_token_url}
+
+NOTE: This URL will provide the following scopes to PyWitch application:
+[channel:manage:redemptions, channel:read:redemptions, user:read:email,
+chat:edit, chat:read]
 
 It will ask for you to login in your Twitch Account to authorize. After
 authorizing it, it will redirect to an (usually) broken page. The only thing
@@ -45,6 +40,20 @@ you need from the page is its URL. Copy that URL, it should look like this:
 {response_token_url}
 
 Your token is what is filling YOUR_ACCESS_TOKEN from the URL. 
+
+Alternatively, you can create a Twitch Application in the
+following URL:
+https://dev.twitch.tv
+
+To do so, first login with your Twitch Account, click "Your Console", then 
+"Applications" and "Register Your Application".
+Give it a pretty name and set OAuth Redirect URLs as "https://localhost", and
+set Category to any of the given options.
+After that, your application will receive an "Client ID", keep that in hands.
+
+Now you need to access the following URL, replacing {__pywitch_client_id__}
+with your application client_id:
+{get_token_url}
 """
 
 
@@ -73,6 +82,14 @@ def get_privmsg(string):
         return string[ipos:fpos]
     except:
         return ''
+        
+def json_eval(string):
+    if not string:
+        return {}
+    try:
+        return json.loads(string)
+    except Exception as e:
+        return {}
 
 
 class PyWitch:
@@ -81,8 +98,11 @@ class PyWitch:
         self.token = token
         self.verbose = verbose
         self.threads = {}
-        self.data = {}
-        self.thread_kind = {'tmi': self.thread_tmi}
+        self.data = {'tmi': {}, 'rewards': {}}
+        self.thread_kind = {
+            'tmi': self.thread_tmi,
+            'rewards': self.thread_rewards
+        }
 
         if not (self.token):
             self.log(no_token_msg)
@@ -146,9 +166,65 @@ class PyWitch:
                         'display_name': display_name,
                         'event_time': event_time,
                         'message': message,
-                        'event': event,
+                        'event_raw': event,
                     }
         except:
+            return
+            
+    async def thread_rewards(self):
+        try:
+            kind = 'rewards'
+            user_id = self.validation['user_id']
+            async with websockets.connect(
+                "wss://pubsub-edge.twitch.tv"
+            ) as websocket:
+
+                await websocket.send(json.dumps({ 'type': 'PING' }))
+                data={
+                    'type': "LISTEN",
+                    'nonce': nonce(15),
+                    'data': {
+                        'topics': [ f'channel-points-channel-v1.{user_id}' ],
+                        'auth_token': f'{self.token}'
+                    }
+                }
+                await websocket.send(json.dumps(data))
+                while self.threads[kind]['running']:
+                    event = await websocket.recv()
+                    event_json = json_eval(event)
+                    event_time = time.time()
+                    event_data = event_json.get('data',{})
+                    event_message = json_eval(event_data.get('message',''))
+                    event_msgdata = event_message.get('data',{})
+                    event_redemption = event_msgdata.get('redemption',{})
+                    event_reward = event_redemption.get('reward', {})
+                    event_user = event_redemption.get('user',{})
+                    event_global_cooldown = event_reward.get(
+                        'global_cooldown', {}
+                    )
+                    event_cooldown_seconds = event_global_cooldown.get(
+                        'global_cooldown_seconds'
+                    )
+                    event_cooldown_expires_at=event_reward.get(
+                        'cooldown_expires_at'
+                    )
+                    self.data[kind] = {
+                        'type': event_json.get('type'),
+                        'data': event_data,
+                        'login': event_user.get('login'),
+                        'display_name': event_user.get('display_name'),
+                        'title': event_reward.get('title'),
+                        'prompt': event_reward.get('prompt'),
+                        'cost': event_reward.get('cost'),
+                        'user_input': event_redemption.get('user_input'),
+                        'cooldown': event_cooldown_seconds,
+                        'message': event_message,
+                        'event_dict': event_json,
+                        'event_time': event_time,
+                        'event_raw': event,
+                    }
+        except Exception as e:
+            print(e)
             return
 
     def log(self, msg, level=1):
