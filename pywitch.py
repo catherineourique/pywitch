@@ -82,7 +82,8 @@ def get_privmsg(string):
         return string[ipos:fpos]
     except:
         return ''
-        
+
+
 def json_eval(string):
     if not string:
         return {}
@@ -93,15 +94,18 @@ def json_eval(string):
 
 
 class PyWitch:
-    def __init__(self, channel, token=None, verbose=1):
+    def __init__(self, channel, token=None, wait_for_response=True, verbose=1):
         self.channel = channel
         self.token = token
+        self.wait_for_response = wait_for_response
         self.verbose = verbose
         self.threads = {}
         self.data = {'tmi': {}, 'rewards': {}}
+        self.users = {}
         self.thread_kind = {
             'tmi': self.thread_tmi,
-            'rewards': self.thread_rewards
+            'heat': self.thread_heat,
+            'rewards': self.thread_rewards,
         }
 
         if not (self.token):
@@ -170,7 +174,7 @@ class PyWitch:
                     }
         except:
             return
-            
+
     async def thread_rewards(self):
         try:
             kind = 'rewards'
@@ -179,33 +183,33 @@ class PyWitch:
                 "wss://pubsub-edge.twitch.tv"
             ) as websocket:
 
-                await websocket.send(json.dumps({ 'type': 'PING' }))
-                data={
+                await websocket.send(json.dumps({'type': 'PING'}))
+                data = {
                     'type': "LISTEN",
                     'nonce': nonce(15),
                     'data': {
-                        'topics': [ f'channel-points-channel-v1.{user_id}' ],
-                        'auth_token': f'{self.token}'
-                    }
+                        'topics': [f'channel-points-channel-v1.{user_id}'],
+                        'auth_token': f'{self.token}',
+                    },
                 }
                 await websocket.send(json.dumps(data))
                 while self.threads[kind]['running']:
                     event = await websocket.recv()
                     event_json = json_eval(event)
                     event_time = time.time()
-                    event_data = event_json.get('data',{})
-                    event_message = json_eval(event_data.get('message',''))
-                    event_msgdata = event_message.get('data',{})
-                    event_redemption = event_msgdata.get('redemption',{})
+                    event_data = event_json.get('data', {})
+                    event_message = json_eval(event_data.get('message', ''))
+                    event_msgdata = event_message.get('data', {})
+                    event_redemption = event_msgdata.get('redemption', {})
                     event_reward = event_redemption.get('reward', {})
-                    event_user = event_redemption.get('user',{})
+                    event_user = event_redemption.get('user', {})
                     event_global_cooldown = event_reward.get(
                         'global_cooldown', {}
                     )
                     event_cooldown_seconds = event_global_cooldown.get(
                         'global_cooldown_seconds'
                     )
-                    event_cooldown_expires_at=event_reward.get(
+                    event_cooldown_expires_at = event_reward.get(
                         'cooldown_expires_at'
                     )
                     self.data[kind] = {
@@ -226,6 +230,70 @@ class PyWitch:
         except Exception as e:
             print(e)
             return
+
+    async def thread_heat(self):
+        try:
+            kind = 'heat'
+            user_id = self.validation['user_id']
+            async with websockets.connect(
+                f"wss://heat-api.j38.net/channel/{user_id}"
+            ) as websocket:
+
+                while self.threads[kind]['running']:
+                    event = await websocket.recv()
+                    event_data = json_eval(event)
+                    event_user = event_data.get('id')
+                    event_display_name = 'NONE'
+                    event_login = 'NONE'
+                    if event_user:
+                        user_info = self.get_user_info(event_user)
+                        event_display_name = user_info.get('display_name')
+                        event_login = user_info.get('login')
+
+                    self.data[kind] = {
+                        'type': event_data.get('type'),
+                        'message': event_data.get('message'),
+                        'x': event_data.get('x'),
+                        'y': event_data.get('y'),
+                        'type': event_data.get('type'),
+                        'display_name': event_display_name,
+                        'event_login': event_login,
+                        'user_id': event_user,
+                        'event_raw': event,
+                    }
+        except Exception as e:
+            print(e)
+            return
+
+    def get_user_info(self, user_id):
+        if not user_id in self.users:
+            self.users[user_id] = {
+                'display_name': 'REQUESTING USER DISPLAY_NAME',
+                'login': 'REQUESTING USER LOGIN',
+            }
+            request_thread = threading.Thread(
+                target=self.get_user_info_thread, args=(user_id,)
+            )
+            request_thread.start()
+            if self.wait_for_response:
+                request_thread.join()
+        return self.users[user_id]
+
+    def get_user_info_thread(self, user_id):
+        headers = {
+            "Client-ID": self.validation['client_id'],
+            "Authorization": f'Bearer {self.token}',
+            'Accept': 'application/vnd.twitchtv.v5+json',
+        }
+        response = requests.get(
+            f'https://api.twitch.tv/kraken/users/{user_id}', headers=headers
+        )
+        if response.status_code == 200:
+            data = response.json()
+            self.users[user_id]['display_name'] = data['display_name']
+            self.users[user_id]['login'] = data['name']
+        else:
+            self.users.pop(user_id)
 
     def log(self, msg, level=1):
         if self.verbose >= level:
