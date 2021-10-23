@@ -74,6 +74,15 @@ def get_display_name(string):
         return ''
 
 
+def get_user_id(string):
+    try:
+        ipos = string.find('user-id') + 8
+        fpos = string.find(';', ipos)
+        return string[ipos:fpos]
+    except:
+        return ''
+
+
 def get_privmsg(string):
     try:
         ipos = string.find('PRIVMSG')
@@ -100,17 +109,18 @@ class PyWitch:
         self.wait_for_response = wait_for_response
         self.verbose = verbose
         self.threads = {}
-        self.data = {'tmi': {}, 'rewards': {}}
+        self.data = {'tmi': {}, 'rewards': {}, 'heat': {}}
         self.users = {}
         self.thread_kind = {
             'tmi': self.thread_tmi,
             'heat': self.thread_heat,
             'rewards': self.thread_rewards,
         }
+        self.callback = {}
 
         if not (self.token):
             self.log(no_token_msg)
-            raise Exception('Token not provided! Terminating')
+            raise Exception('Token not provided! Terminating.')
 
     def validate_token(self):
         self.log("Validating token...")
@@ -121,7 +131,7 @@ class PyWitch:
             self.log("Successfully validated token!")
         else:
             self.log(f"Failed to validate token: {response.json()}")
-            raise Exception('Failed to validate token')
+            raise Exception('Failed to validate token.')
 
     def start_thread(self, kind):
         if not kind in self.thread_kind:
@@ -165,13 +175,22 @@ class PyWitch:
                     event = await websocket.recv()
                     event_time = time.time()
                     display_name = get_display_name(event)
+                    user_id = get_user_id(event)
+                    if not user_id in self.users:
+                        self.users[user_id] = {
+                            'display_name': display_name,
+                        }
                     message = get_privmsg(event)
                     self.data[kind] = {
                         'display_name': display_name,
                         'event_time': event_time,
+                        'user_id': user_id,
                         'message': message,
                         'event_raw': event,
                     }
+                    event_callback = self.callback.get(kind)
+                    if callable(event_callback):
+                        event_callback(self.data[kind])
         except:
             return
 
@@ -227,6 +246,10 @@ class PyWitch:
                         'event_time': event_time,
                         'event_raw': event,
                     }
+                    event_callback = self.callback.get(kind)
+                    if callable(event_callback):
+                        event_callback(self.data[kind])
+
         except Exception as e:
             print(e)
             return
@@ -242,7 +265,7 @@ class PyWitch:
                 while self.threads[kind]['running']:
                     event = await websocket.recv()
                     event_data = json_eval(event)
-                    event_user = event_data.get('id')
+                    event_user = str(event_data.get('id'))
                     event_display_name = 'NONE'
                     event_login = 'NONE'
                     if event_user:
@@ -261,9 +284,38 @@ class PyWitch:
                         'user_id': event_user,
                         'event_raw': event,
                     }
+                    event_callback = self.callback.get(kind)
+                    if callable(event_callback):
+                        event_callback(self.data[kind])
+
         except Exception as e:
             print(e)
             return
+
+    def set_event_callback(self, kind, callback):
+        if not kind in self.data:
+            raise Exception("Invalid data kind! Terminating.")
+        if not callable(callback):
+            raise Exception("Provided callback is not callable! Terminating.")
+        self.callback[kind] = callback
+
+    def start_tmi(self, callback):
+        if not hasattr(self, 'validation'):
+            self.validate_token()
+        self.set_event_callback('tmi', callback)
+        self.start_thread('tmi')
+
+    def start_rewards(self, callback):
+        if not hasattr(self, 'validation'):
+            self.validate_token()
+        self.set_event_callback('rewards', callback)
+        self.start_thread('rewards')
+
+    def start_heat(self, callback):
+        if not hasattr(self, 'validation'):
+            self.validate_token()
+        self.set_event_callback('heat', callback)
+        self.start_thread('heat')
 
     def get_user_info(self, user_id):
         if not user_id in self.users:
