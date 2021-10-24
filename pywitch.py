@@ -5,6 +5,7 @@ import json
 import random
 import requests
 import threading
+import time
 
 __validate_token_url__ = 'https://id.twitch.tv/oauth2/validate'
 __pywitch_client_id__ = 'l2o6fudb8tq6394phgudstdzlouo9n'
@@ -13,7 +14,7 @@ get_token_url = (
     'https://id.twitch.tv/oauth2/authorize?'
     'response_type=token&'
     f'client_id={__pywitch_client_id__}&'
-    'redirect_uri=http://localhost&'
+    'redirect_uri=https://localhost&'
     'scope=channel:manage:redemptions%20channel:read:redemptions%20'
     'user:read:email%20chat:edit%20chat:read'
 )
@@ -56,6 +57,7 @@ with your application client_id:
 {get_token_url}
 """
 
+### Auxiliary functions ######################################################
 
 def nonce(length):
     possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -101,6 +103,7 @@ def json_eval(string):
     except Exception as e:
         return {}
 
+##############################################################################
 
 class PyWitch:
     def __init__(self, channel, token=None, wait_for_response=True, verbose=1):
@@ -109,18 +112,22 @@ class PyWitch:
         self.wait_for_response = wait_for_response
         self.verbose = verbose
         self.threads = {}
-        self.data = {'tmi': {}, 'rewards': {}, 'heat': {}}
+        self.data = {'tmi': {}, 'rewards': {}, 'heat': {}, 'stream_info': {}}
         self.users = {}
         self.thread_kind = {
             'tmi': self.thread_tmi,
             'heat': self.thread_heat,
             'rewards': self.thread_rewards,
+            'stream_info': self.thread_stream_info,
         }
         self.callback = {}
 
         if not (self.token):
             self.log(no_token_msg)
             raise Exception('Token not provided! Terminating.')
+            
+        if not hasattr(self, 'validation'):
+            self.validate_token()
 
     def validate_token(self):
         self.log("Validating token...")
@@ -129,15 +136,28 @@ class PyWitch:
         if response.status_code == 200:
             self.validation = response.json()
             self.log("Successfully validated token!")
+            
+            self.helix_headers = {
+                "Client-ID": self.validation["client_id"],
+                "Authorization": f"Bearer {self.token}",
+            }
+            
         else:
             self.log(f"Failed to validate token: {response.json()}")
             raise Exception('Failed to validate token.')
 
-    def start_thread(self, kind):
+### Thread management functions ##############################################
+
+    def start_thread(self, kind, is_async=True):
         if not kind in self.thread_kind:
             self.log(f"Invalid thread kind! Returning")
             return False
-        thread = threading.Thread(target=self.start_async, args=(kind,))
+        if not hasattr(self, 'validation'):
+            self.validate_token()
+        if is_async:
+            thread = threading.Thread(target=self.start_async, args=(kind,))
+        else:
+            thread = threading.Thread(target=self.thread_kind[kind], args=())
         self.threads[kind] = {'thread': thread, 'running': True}
         self.threads[kind]['thread'].start()
         return thread
@@ -159,6 +179,11 @@ class PyWitch:
         while self.threads[kind]['running']:
             self.thread_kind[kind]
             asyncio.run(self.thread_kind[kind]())
+            
+##############################################################################
+
+### Thread functions #########################################################
+
 
     async def thread_tmi(self):
         try:
@@ -173,6 +198,8 @@ class PyWitch:
                 await websocket.send(f'JOIN #{self.channel}')
                 while self.threads[kind]['running']:
                     event = await websocket.recv()
+                    if not 'PRIVMSG' in event:
+                        continue
                     event_time = time.time()
                     display_name = get_display_name(event)
                     user_id = get_user_id(event)
@@ -246,6 +273,7 @@ class PyWitch:
                         'event_time': event_time,
                         'event_raw': event,
                     }
+                    
                     event_callback = self.callback.get(kind)
                     if callable(event_callback):
                         event_callback(self.data[kind])
@@ -269,7 +297,7 @@ class PyWitch:
                     event_display_name = 'NONE'
                     event_login = 'NONE'
                     if event_user:
-                        user_info = self.get_user_info(event_user)
+                        user_info = self.get_user_info_by_id(event_user)
                         event_display_name = user_info.get('display_name')
                         event_login = user_info.get('login')
 
@@ -291,62 +319,101 @@ class PyWitch:
         except Exception as e:
             print(e)
             return
-
-    def set_event_callback(self, kind, callback):
-        if not kind in self.data:
-            raise Exception("Invalid data kind! Terminating.")
-        if not callable(callback):
-            raise Exception("Provided callback is not callable! Terminating.")
-        self.callback[kind] = callback
-
-    def start_tmi(self, callback):
-        if not hasattr(self, 'validation'):
-            self.validate_token()
-        self.set_event_callback('tmi', callback)
-        self.start_thread('tmi')
-
-    def start_rewards(self, callback):
-        if not hasattr(self, 'validation'):
-            self.validate_token()
-        self.set_event_callback('rewards', callback)
-        self.start_thread('rewards')
-
-    def start_heat(self, callback):
-        if not hasattr(self, 'validation'):
-            self.validate_token()
-        self.set_event_callback('heat', callback)
-        self.start_thread('heat')
-
-    def get_user_info(self, user_id):
-        if not user_id in self.users:
-            self.users[user_id] = {
-                'display_name': 'REQUESTING USER DISPLAY_NAME',
-                'login': 'REQUESTING USER LOGIN',
-            }
+            
+    def thread_stream_info(self):
+        kind = 'stream_info'
+        while self.threads[kind]['running']:
             request_thread = threading.Thread(
-                target=self.get_user_info_thread, args=(user_id,)
+                target=self.get_stream_info, args=(kind,)
             )
             request_thread.start()
             if self.wait_for_response:
                 request_thread.join()
-        return self.users[user_id]
-
-    def get_user_info_thread(self, user_id):
-        headers = {
-            "Client-ID": self.validation['client_id'],
-            "Authorization": f'Bearer {self.token}',
-            'Accept': 'application/vnd.twitchtv.v5+json',
-        }
+            time.sleep(self.stream_info_interval)
+            
+    def get_stream_info(self, kind):
+        user_id = self.validation['user_id']
         response = requests.get(
-            f'https://api.twitch.tv/kraken/users/{user_id}', headers=headers
+            f'https://api.twitch.tv/helix/streams',
+            headers=self.helix_headers,
+            params = {'user_id': user_id},
         )
         if response.status_code == 200:
             data = response.json()
-            self.users[user_id]['display_name'] = data['display_name']
-            self.users[user_id]['login'] = data['name']
+            data = data.get('data',[])
+            data = data and data[0] or {}
+            if self.data['stream_info'] == data:
+                return
+            self.data['stream_info'] = data
+            event_callback = self.callback.get(kind)
+            if callable(event_callback):
+                event_callback(self.data[kind])
+            
+##############################################################################
+
+### Start functions ##########################################################
+
+    def start_tmi(self, callback = None):
+        self.set_event_callback('tmi', callback)
+        self.start_thread('tmi')
+
+    def start_rewards(self, callback = None):
+        self.set_event_callback('rewards', callback)
+        self.start_thread('rewards')
+
+    def start_heat(self, callback = None):
+        self.set_event_callback('heat', callback)
+        self.start_thread('heat')
+        
+    def start_stream_info(self, callback = None, interval = 5):
+        self.stream_info_interval = interval
+        self.set_event_callback('stream_info', callback)
+        self.start_thread('stream_info')
+        
+##############################################################################
+
+### Auxiliary object functions ###############################################
+
+    def set_event_callback(self, kind, callback):
+        if not kind in self.data:
+            raise Exception("Invalid data kind! Terminating.")
+        if not callable(callback) and callback != None:
+            raise Exception("Provided callback is not callable! Terminating.")
+        self.callback[kind] = callback
+
+    def get_user_info_by_id(self, user_id):
+        default = {
+            'display_name': 'PYWITCH_LOADING',
+            'login': 'PYWITCH_LOADING',
+        }
+        if not user_id in self.users:
+            self.users[user_id] = default
+            request_thread = threading.Thread(
+                target=self.get_user_info_by_id_thread, args=(user_id,)
+            )
+            request_thread.start()
+            if self.wait_for_response:
+                request_thread.join()
+        return self.users.get(user_id, default)
+
+    def get_user_info_by_id_thread(self, user_id):
+
+        response = requests.get(
+            f'https://api.twitch.tv/helix/channels',
+            headers = self.helix_headers,
+            params = {'broadcaster_id': user_id}
+        )
+        if response.status_code == 200:
+            data = response.json()
+            data = data.get('data',[])
+            data = data and data[0] or {}
+            self.users[user_id]['display_name'] = data.get('broadcaster_name')
+            self.users[user_id]['login'] = data.get('broadcaster_name')
         else:
             self.users.pop(user_id)
 
     def log(self, msg, level=1):
         if self.verbose >= level:
             print(f'(PyWitch) {msg}')
+            
+##############################################################################
