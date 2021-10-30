@@ -1,6 +1,5 @@
-import asyncio
+from websocket import create_connection
 import time
-import websockets
 import json
 import random
 import requests
@@ -113,12 +112,15 @@ class PyWitch:
         self.verbose = verbose
         self.threads = {}
         self.data = {'tmi': {}, 'rewards': {}, 'heat': {}, 'stream_info': {}}
+        self.alive = {}
+        self.websockets = {}
         self.users = {}
-        self.thread_kind = {
-            'tmi': self.thread_tmi,
-            'heat': self.thread_heat,
-            'rewards': self.thread_rewards,
-            'stream_info': self.thread_stream_info,
+        self.users_login = {}
+        self.kind_functions = {
+            'tmi': [self.connect_tmi, self.event_tmi],
+            'heat': [self.connect_heat, self.event_heat],
+            'rewards': [self.connect_rewards, self.event_rewards],
+            'stream_info': [self.event_stream_info],
         }
         self.callback = {}
 
@@ -128,6 +130,13 @@ class PyWitch:
             
         if not hasattr(self, 'validation'):
             self.validate_token()
+            
+        if not self.validation['user_id'] in self.users:
+            self.get_user_info(
+                self.validation['user_id'],
+                wait_for_response=True
+            )
+            
 
     def validate_token(self):
         self.log("Validating token...")
@@ -148,16 +157,15 @@ class PyWitch:
 
 ### Thread management functions ##############################################
 
-    def start_thread(self, kind, is_async=True):
-        if not kind in self.thread_kind:
-            self.log(f"Invalid thread kind! Returning")
-            return False
-        if not hasattr(self, 'validation'):
-            self.validate_token()
-        if is_async:
-            thread = threading.Thread(target=self.start_async, args=(kind,))
-        else:
-            thread = threading.Thread(target=self.thread_kind[kind], args=())
+    def keep_alive(self, kind):
+        functions = self.kind_functions[kind]
+        self.alive[kind]=True
+        while kind in self.alive and self.alive[kind]:
+            for fn in functions:
+                fn()
+
+    def start_thread(self, kind):
+        thread = threading.Thread(target=self.keep_alive, args=(kind,))
         self.threads[kind] = {'thread': thread, 'running': True}
         self.threads[kind]['thread'].start()
         return thread
@@ -175,163 +183,195 @@ class PyWitch:
         for kind in kinds:
             self.stop_signal_thread(kind)
 
-    def start_async(self, kind):
-        while self.threads[kind]['running']:
-            self.thread_kind[kind]
-            asyncio.run(self.thread_kind[kind]())
-            
 ##############################################################################
 
-### Thread functions #########################################################
+### Connection functions #####################################################
 
-
-    async def thread_tmi(self):
+    def connect_tmi(self):
         try:
             kind = 'tmi'
-            async with websockets.connect(
-                "wss://irc-ws.chat.twitch.tv:443"
-            ) as websocket:
-                cap = 'twitch.tv/tags twitch.tv/commands twitch.tv/membership'
-                await websocket.send(f'CAP REQ : {cap}')
-                await websocket.send(f'PASS oauth:{self.token}')
-                await websocket.send(f'NICK {self.channel}')
-                await websocket.send(f'JOIN #{self.channel}')
-                while self.threads[kind]['running']:
-                    event = await websocket.recv()
-                    if not 'PRIVMSG' in event:
-                        continue
-                    event_time = time.time()
-                    display_name = get_display_name(event)
-                    user_id = get_user_id(event)
-                    if not user_id in self.users:
-                        self.users[user_id] = {
-                            'display_name': display_name,
-                        }
-                    message = get_privmsg(event)
-                    self.data[kind] = {
-                        'display_name': display_name,
-                        'event_time': event_time,
-                        'user_id': user_id,
-                        'message': message,
-                        'event_raw': event,
-                    }
-                    event_callback = self.callback.get(kind)
-                    if callable(event_callback):
-                        event_callback(self.data[kind])
+            ws = create_connection("wss://irc-ws.chat.twitch.tv:443")
+            cap = 'twitch.tv/tags twitch.tv/commands twitch.tv/membership'
+            ws.send(f'CAP REQ : {cap}')
+            ws.send(f'PASS oauth:{self.token}')
+            ws.send(f'NICK {self.channel}')
+            ws.send(f'JOIN #{self.channel}')
+            self.websockets[kind] = ws
+            return ws
         except:
-            return
+            return None
 
-    async def thread_rewards(self):
+
+    def connect_rewards(self):
         try:
             kind = 'rewards'
             user_id = self.validation['user_id']
-            async with websockets.connect(
-                "wss://pubsub-edge.twitch.tv"
-            ) as websocket:
-
-                await websocket.send(json.dumps({'type': 'PING'}))
-                data = {
-                    'type': "LISTEN",
-                    'nonce': nonce(15),
-                    'data': {
-                        'topics': [f'channel-points-channel-v1.{user_id}'],
-                        'auth_token': f'{self.token}',
-                    },
-                }
-                await websocket.send(json.dumps(data))
-                while self.threads[kind]['running']:
-                    event = await websocket.recv()
-                    event_json = json_eval(event)
-                    event_time = time.time()
-                    event_data = event_json.get('data', {})
-                    event_message = json_eval(event_data.get('message', ''))
-                    event_msgdata = event_message.get('data', {})
-                    event_redemption = event_msgdata.get('redemption', {})
-                    event_reward = event_redemption.get('reward', {})
-                    event_user = event_redemption.get('user', {})
-                    event_global_cooldown = event_reward.get(
-                        'global_cooldown', {}
-                    )
-                    event_cooldown_seconds = event_global_cooldown.get(
-                        'global_cooldown_seconds'
-                    )
-                    event_cooldown_expires_at = event_reward.get(
-                        'cooldown_expires_at'
-                    )
-                    self.data[kind] = {
-                        'type': event_json.get('type'),
-                        'data': event_data,
-                        'login': event_user.get('login'),
-                        'display_name': event_user.get('display_name'),
-                        'title': event_reward.get('title'),
-                        'prompt': event_reward.get('prompt'),
-                        'cost': event_reward.get('cost'),
-                        'user_input': event_redemption.get('user_input'),
-                        'cooldown': event_cooldown_seconds,
-                        'message': event_message,
-                        'event_dict': event_json,
-                        'event_time': event_time,
-                        'event_raw': event,
-                    }
-                    
-                    event_callback = self.callback.get(kind)
-                    if callable(event_callback):
-                        event_callback(self.data[kind])
-
-        except Exception as e:
-            print(e)
-            return
-
-    async def thread_heat(self):
+            ws = create_connection("wss://pubsub-edge.twitch.tv")
+            ws.send(json.dumps({'type': 'PING'}))
+            data = {
+                'type': "LISTEN",
+                'nonce': nonce(15),
+                'data': {
+                    'topics': [f'channel-points-channel-v1.{user_id}'],
+                    'auth_token': f'{self.token}',
+                },
+            }
+            ws.send(json.dumps(data))
+            self.websockets[kind] = ws
+            return ws
+        except:
+            return None
+            
+            
+    def connect_heat(self):
         try:
             kind = 'heat'
             user_id = self.validation['user_id']
-            async with websockets.connect(
+            ws = create_connection(
                 f"wss://heat-api.j38.net/channel/{user_id}"
-            ) as websocket:
+            )
+            self.websockets[kind] = ws
+            return ws
+        except:
+            return None
 
-                while self.threads[kind]['running']:
-                    event = await websocket.recv()
-                    event_data = json_eval(event)
-                    event_user = str(event_data.get('id'))
-                    event_display_name = 'NONE'
-                    event_login = 'NONE'
-                    if event_user:
-                        user_info = self.get_user_info_by_id(event_user)
-                        event_display_name = user_info.get('display_name')
-                        event_login = user_info.get('login')
 
-                    self.data[kind] = {
-                        'type': event_data.get('type'),
-                        'message': event_data.get('message'),
-                        'x': event_data.get('x'),
-                        'y': event_data.get('y'),
-                        'type': event_data.get('type'),
-                        'display_name': event_display_name,
-                        'event_login': event_login,
-                        'user_id': event_user,
-                        'event_raw': event,
+##############################################################################
+
+### Event catch functions ####################################################
+
+    def event_tmi(self):
+        try:
+            kind = 'tmi'
+            ws = self.websockets[kind]
+            while self.threads[kind]['running']:
+                event = ws.recv()
+                if not 'PRIVMSG' in event:
+                    continue
+                event_time = time.time()
+                display_name = get_display_name(event)
+                user_id = get_user_id(event)
+                if not user_id in self.users:
+                    self.users[user_id] = {
+                        'display_name': display_name,
                     }
-                    event_callback = self.callback.get(kind)
-                    if callable(event_callback):
-                        event_callback(self.data[kind])
+                message = get_privmsg(event)
+                self.data[kind] = {
+                    'display_name': display_name,
+                    'event_time': event_time,
+                    'user_id': user_id,
+                    'message': message,
+                    'event_raw': event,
+                }
+                event_callback = self.callback.get(kind)
+                if event_callback and callable(event_callback):
+                    event_callback(self.data[kind])
+        except:
+            return
+    
 
-        except Exception as e:
-            print(e)
+    def event_rewards(self):
+        try:
+            kind = 'rewards'
+            ws = self.websockets[kind]
+            while self.threads[kind]['running']:
+                event = ws.recv()
+                event_json = json_eval(event)
+                event_time = time.time()
+                event_data = event_json.get('data', {})
+                event_message = json_eval(event_data.get('message', ''))
+                event_msgdata = event_message.get('data', {})
+                event_redemption = event_msgdata.get('redemption', {})
+                event_reward = event_redemption.get('reward', {})
+                event_user = event_redemption.get('user', {})
+                event_global_cooldown = event_reward.get(
+                    'global_cooldown', {}
+                )
+                event_cooldown_seconds = event_global_cooldown.get(
+                    'global_cooldown_seconds'
+                )
+                event_cooldown_expires_at = event_reward.get(
+                    'cooldown_expires_at'
+                )
+                self.data[kind] = {
+                    'type': event_json.get('type'),
+                    'data': event_data,
+                    'login': event_user.get('login'),
+                    'display_name': event_user.get('display_name'),
+                    'title': event_reward.get('title'),
+                    'prompt': event_reward.get('prompt'),
+                    'cost': event_reward.get('cost'),
+                    'user_input': event_redemption.get('user_input'),
+                    'cooldown': event_cooldown_seconds,
+                    'message': event_message,
+                    'event_dict': event_json,
+                    'event_time': event_time,
+                    'event_raw': event,
+                }
+                
+                event_callback = self.callback.get(kind)
+                if event_callback and callable(event_callback):
+                    event_callback(self.data[kind])
+        except:
+            return
+    
+    
+    def event_heat(self):
+        try:
+            kind='heat'
+            ws = self.websockets[kind]
+            while self.threads[kind]['running']:
+                event = ws.recv()
+                event_data = json_eval(event)
+                event_user = str(event_data.get('id'))
+                event_display_name = 'NONE'
+                event_login = 'NONE'
+                if event_user:
+                    user_info = self.get_user_info_by_id(
+                        event_user,
+                        self.wait_for_response
+                    )
+                    event_display_name = user_info.get('display_name')
+                    event_login = user_info.get('login')
+
+                self.data[kind] = {
+                    'type': event_data.get('type'),
+                    'message': event_data.get('message'),
+                    'x': event_data.get('x'),
+                    'y': event_data.get('y'),
+                    'type': event_data.get('type'),
+                    'display_name': event_display_name,
+                    'event_login': event_login,
+                    'user_id': event_user,
+                    'event_raw': event,
+                }
+                event_callback = self.callback.get(kind)
+                if callable(event_callback):
+                    event_callback(self.data[kind])
+        except:
             return
             
-    def thread_stream_info(self):
-        kind = 'stream_info'
-        while self.threads[kind]['running']:
-            request_thread = threading.Thread(
-                target=self.get_stream_info, args=(kind,)
-            )
-            request_thread.start()
-            if self.wait_for_response:
-                request_thread.join()
-            time.sleep(self.stream_info_interval)
             
-    def get_stream_info(self, kind):
+    def event_stream_info(self):
+        try:
+            kind = 'stream_info'
+            while self.threads[kind]['running']:
+                request_thread = threading.Thread(
+                    target=self.get_stream_info, args=(kind,)
+                )
+                request_thread.start()
+                if self.wait_for_response:
+                    request_thread.join()
+                time.sleep(self.stream_info_interval)
+        except:
+            return
+
+            
+##############################################################################
+
+### Request functions #########################################################
+            
+    def request_stream_info(self, kind):
         user_id = self.validation['user_id']
         response = requests.get(
             f'https://api.twitch.tv/helix/streams',
@@ -348,6 +388,35 @@ class PyWitch:
             event_callback = self.callback.get(kind)
             if callable(event_callback):
                 event_callback(self.data[kind])
+                
+    def request_user_info(self, user_id=None, login=None):
+        if not (user_id or login):
+            return
+        if user_id:
+            params = {'id': user_id}
+        if login:
+            params = {'login': login}
+            
+        response = requests.get(
+            f'https://api.twitch.tv/helix/users',
+            headers = self.helix_headers,
+            params = params
+        )
+        if response.status_code == 200:
+            data = response.json()
+            data = data.get('data',[])
+            data = data and data[0] or {}
+            response_user_id = data.get('id')
+            response_display_name = data.get('display_name')
+            response_login = data.get('login')
+            self.users[response_user_id] = {
+                'login': response_login,
+                'user_id': response_user_id,
+                'display_name': response_display_name,
+            }
+            self.users_login[response_login]=response_user_id
+        else:
+            self.users.pop(user_id)
             
 ##############################################################################
 
@@ -381,36 +450,29 @@ class PyWitch:
             raise Exception("Provided callback is not callable! Terminating.")
         self.callback[kind] = callback
 
-    def get_user_info_by_id(self, user_id):
+    def get_user_info(self, user_id=None, login=None, wait_for_response=True):
+        if user_id:
+            user_id=str(user_id)
+        if login:
+            user_id = self.users_login.get(login)
         default = {
-            'display_name': 'PYWITCH_LOADING',
             'login': 'PYWITCH_LOADING',
+            'user_id': 'PYWITCH_LOADING',
+            'display_name': 'PYWITCH_LOADING',
         }
         if not user_id in self.users:
-            self.users[user_id] = default
             request_thread = threading.Thread(
-                target=self.get_user_info_by_id_thread, args=(user_id,)
+                target=self.request_user_info,
+                kwargs={'user_id': user_id, 'login': login}
             )
             request_thread.start()
-            if self.wait_for_response:
+            if wait_for_response:
                 request_thread.join()
+                if login:
+                    user_id = self.users_login.get(login)
+            
         return self.users.get(user_id, default)
 
-    def get_user_info_by_id_thread(self, user_id):
-
-        response = requests.get(
-            f'https://api.twitch.tv/helix/channels',
-            headers = self.helix_headers,
-            params = {'broadcaster_id': user_id}
-        )
-        if response.status_code == 200:
-            data = response.json()
-            data = data.get('data',[])
-            data = data and data[0] or {}
-            self.users[user_id]['display_name'] = data.get('broadcaster_name')
-            self.users[user_id]['login'] = data.get('broadcaster_name')
-        else:
-            self.users.pop(user_id)
 
     def log(self, msg, level=1):
         if self.verbose >= level:
