@@ -5,6 +5,7 @@ import random
 import requests
 import threading
 import time
+from pywitch_tmi import TMI
 
 __validate_token_url__ = 'https://id.twitch.tv/oauth2/validate'
 __pywitch_client_id__ = 'l2o6fudb8tq6394phgudstdzlouo9n'
@@ -58,40 +59,13 @@ with your application client_id:
 
 ### Auxiliary functions ######################################################
 
+
 def nonce(length):
     possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     text = ''.join(
         [possible[int(random.random() * len(possible))] for i in range(length)]
     )
     return text
-
-
-def get_display_name(string):
-    try:
-        ipos = string.find('display-name') + 13
-        fpos = string.find(';', ipos)
-        return string[ipos:fpos]
-    except:
-        return ''
-
-
-def get_user_id(string):
-    try:
-        ipos = string.find('user-id') + 8
-        fpos = string.find(';', ipos)
-        return string[ipos:fpos]
-    except:
-        return ''
-
-
-def get_privmsg(string):
-    try:
-        ipos = string.find('PRIVMSG')
-        ipos = string.find(':', ipos) + 1
-        fpos = string.find('\r\n', ipos)
-        return string[ipos:fpos]
-    except:
-        return ''
 
 
 def json_eval(string):
@@ -102,14 +76,15 @@ def json_eval(string):
     except Exception as e:
         return {}
 
+
 ##############################################################################
 
+
 class PyWitch:
-    def __init__(self, channel, token=None, wait_for_response=True, verbose=1):
-        self.channel = channel
+    def __init__(self, token=None, verbose=1):
         self.token = token
-        self.wait_for_response = wait_for_response
         self.verbose = verbose
+        self.instances = {}
         self.threads = {}
         self.data = {'tmi': {}, 'rewards': {}, 'heat': {}, 'stream_info': {}}
         self.alive = {}
@@ -117,7 +92,7 @@ class PyWitch:
         self.users = {}
         self.users_login = {}
         self.kind_functions = {
-            'tmi': [self.connect_tmi, self.event_tmi],
+            #'tmi': [self.connect_tmi, self.event_tmi],
             'heat': [self.connect_heat, self.event_heat],
             'rewards': [self.connect_rewards, self.event_rewards],
             'stream_info': [self.event_stream_info],
@@ -127,16 +102,13 @@ class PyWitch:
         if not (self.token):
             self.log(no_token_msg)
             raise Exception('Token not provided! Terminating.')
-            
+
         if not hasattr(self, 'validation'):
             self.validate_token()
-            
-        if not self.validation['user_id'] in self.users:
-            self.get_user_info(
-                self.validation['user_id'],
-                wait_for_response=True
-            )
-            
+
+        self.user = self.get_user_info(
+            self.validation['user_id'], wait_for_response=True
+        )
 
     def validate_token(self):
         self.log("Validating token...")
@@ -145,32 +117,32 @@ class PyWitch:
         if response.status_code == 200:
             self.validation = response.json()
             self.log("Successfully validated token!")
-            
+
             self.helix_headers = {
                 "Client-ID": self.validation["client_id"],
                 "Authorization": f"Bearer {self.token}",
             }
-            
+
         else:
             self.log(f"Failed to validate token: {response.json()}")
             raise Exception('Failed to validate token.')
 
-### Thread management functions ##############################################
+    ### Thread management functions ##############################################
 
-    def keep_alive(self, kind):
+    def keep_alive(self, kind, channel):
         functions = self.kind_functions[kind]
-        self.alive[kind]=True
+        self.alive[kind] = True
         while kind in self.alive and self.alive[kind]:
             for fn in functions:
-                fn()
+                fn(channel)
 
-    def start_thread(self, kind):
-        thread = threading.Thread(target=self.keep_alive, args=(kind,))
+    def start_thread(self, kind, channel):
+        thread = threading.Thread(target=self.keep_alive, args=(kind, channel))
         self.threads[kind] = {'thread': thread, 'running': True}
         self.threads[kind]['thread'].start()
         return thread
 
-    def stop_signal_thread(self, kind):
+    def stop_signal_thread(self, kind, channel):
         if not kind in self.threads:
             self.log(f"Invalid thread kind! Returning")
             return False
@@ -183,26 +155,11 @@ class PyWitch:
         for kind in kinds:
             self.stop_signal_thread(kind)
 
-##############################################################################
+    ##############################################################################
 
-### Connection functions #####################################################
+    ### Connection functions #####################################################
 
-    def connect_tmi(self):
-        try:
-            kind = 'tmi'
-            ws = create_connection("wss://irc-ws.chat.twitch.tv:443")
-            cap = 'twitch.tv/tags twitch.tv/commands twitch.tv/membership'
-            ws.send(f'CAP REQ : {cap}')
-            ws.send(f'PASS oauth:{self.token}')
-            ws.send(f'NICK {self.channel}')
-            ws.send(f'JOIN #{self.channel}')
-            self.websockets[kind] = ws
-            return ws
-        except:
-            return None
-
-
-    def connect_rewards(self):
+    def connect_rewards(self, channel):
         try:
             kind = 'rewards'
             user_id = self.validation['user_id']
@@ -221,56 +178,22 @@ class PyWitch:
             return ws
         except:
             return None
-            
-            
-    def connect_heat(self):
+
+    def connect_heat(self, channel):
         try:
             kind = 'heat'
             user_id = self.validation['user_id']
-            ws = create_connection(
-                f"wss://heat-api.j38.net/channel/{user_id}"
-            )
+            ws = create_connection(f"wss://heat-api.j38.net/channel/{user_id}")
             self.websockets[kind] = ws
             return ws
         except:
             return None
 
+    ##############################################################################
 
-##############################################################################
+    ### Event catch functions ####################################################
 
-### Event catch functions ####################################################
-
-    def event_tmi(self):
-        try:
-            kind = 'tmi'
-            ws = self.websockets[kind]
-            while self.threads[kind]['running']:
-                event = ws.recv()
-                if not 'PRIVMSG' in event:
-                    continue
-                event_time = time.time()
-                display_name = get_display_name(event)
-                user_id = get_user_id(event)
-                if not user_id in self.users:
-                    self.users[user_id] = {
-                        'display_name': display_name,
-                    }
-                message = get_privmsg(event)
-                self.data[kind] = {
-                    'display_name': display_name,
-                    'event_time': event_time,
-                    'user_id': user_id,
-                    'message': message,
-                    'event_raw': event,
-                }
-                event_callback = self.callback.get(kind)
-                if event_callback and callable(event_callback):
-                    event_callback(self.data[kind])
-        except:
-            return
-    
-
-    def event_rewards(self):
+    def event_rewards(self, channel):
         try:
             kind = 'rewards'
             ws = self.websockets[kind]
@@ -284,9 +207,7 @@ class PyWitch:
                 event_redemption = event_msgdata.get('redemption', {})
                 event_reward = event_redemption.get('reward', {})
                 event_user = event_redemption.get('user', {})
-                event_global_cooldown = event_reward.get(
-                    'global_cooldown', {}
-                )
+                event_global_cooldown = event_reward.get('global_cooldown', {})
                 event_cooldown_seconds = event_global_cooldown.get(
                     'global_cooldown_seconds'
                 )
@@ -308,17 +229,16 @@ class PyWitch:
                     'event_time': event_time,
                     'event_raw': event,
                 }
-                
+
                 event_callback = self.callback.get(kind)
                 if event_callback and callable(event_callback):
                     event_callback(self.data[kind])
         except:
             return
-    
-    
-    def event_heat(self):
+
+    def event_heat(self, channel):
         try:
-            kind='heat'
+            kind = 'heat'
             ws = self.websockets[kind]
             while self.threads[kind]['running']:
                 event = ws.recv()
@@ -327,12 +247,13 @@ class PyWitch:
                 event_display_name = 'NONE'
                 event_login = 'NONE'
                 if event_user:
-                    user_info = self.get_user_info_by_id(
-                        event_user,
-                        self.wait_for_response
+                    user_info = self.get_user_info(
+                        user_id=event_user, wait_for_response=False
                     )
                     event_display_name = user_info.get('display_name')
                     event_login = user_info.get('login')
+                if event_login == 'PYWITCH_LOADING':
+                    return
 
                 self.data[kind] = {
                     'type': event_data.get('type'),
@@ -350,9 +271,8 @@ class PyWitch:
                     event_callback(self.data[kind])
         except:
             return
-            
-            
-    def event_stream_info(self):
+
+    def event_stream_info(self, channel):
         try:
             kind = 'stream_info'
             while self.threads[kind]['running']:
@@ -366,21 +286,20 @@ class PyWitch:
         except:
             return
 
-            
-##############################################################################
+    ##############################################################################
 
-### Request functions #########################################################
-            
+    ### Request functions #########################################################
+
     def request_stream_info(self, kind):
         user_id = self.validation['user_id']
         response = requests.get(
             f'https://api.twitch.tv/helix/streams',
             headers=self.helix_headers,
-            params = {'user_id': user_id},
+            params={'user_id': user_id},
         )
         if response.status_code == 200:
             data = response.json()
-            data = data.get('data',[])
+            data = data.get('data', [])
             data = data and data[0] or {}
             if self.data['stream_info'] == data:
                 return
@@ -388,7 +307,7 @@ class PyWitch:
             event_callback = self.callback.get(kind)
             if callable(event_callback):
                 event_callback(self.data[kind])
-                
+
     def request_user_info(self, user_id=None, login=None):
         if not (user_id or login):
             return
@@ -396,15 +315,15 @@ class PyWitch:
             params = {'id': user_id}
         if login:
             params = {'login': login}
-            
+
         response = requests.get(
             f'https://api.twitch.tv/helix/users',
-            headers = self.helix_headers,
-            params = params
+            headers=self.helix_headers,
+            params=params,
         )
         if response.status_code == 200:
             data = response.json()
-            data = data.get('data',[])
+            data = data.get('data', [])
             data = data and data[0] or {}
             response_user_id = data.get('id')
             response_display_name = data.get('display_name')
@@ -414,34 +333,35 @@ class PyWitch:
                 'user_id': response_user_id,
                 'display_name': response_display_name,
             }
-            self.users_login[response_login]=response_user_id
+            self.users_login[response_login] = response_user_id
         else:
             self.users.pop(user_id)
-            
-##############################################################################
 
-### Start functions ##########################################################
+    ##############################################################################
 
-    def start_tmi(self, callback = None):
-        self.set_event_callback('tmi', callback)
-        self.start_thread('tmi')
+    ### Start functions ##########################################################
 
-    def start_rewards(self, callback = None):
+    def start_tmi(self, channel, callback=None):
+        self.instances['tmi'] = TMI(self, channel, callback)
+        self.instances['tmi'].start_thread()
+        return self.instances['tmi']
+
+    def start_rewards(self, channel, callback=None):
         self.set_event_callback('rewards', callback)
-        self.start_thread('rewards')
+        self.start_thread('rewards', channel)
 
-    def start_heat(self, callback = None):
+    def start_heat(self, channel, callback=None):
         self.set_event_callback('heat', callback)
-        self.start_thread('heat')
-        
-    def start_stream_info(self, callback = None, interval = 5):
+        self.start_thread('heat', channel)
+
+    def start_stream_info(self, channel, callback=None, interval=5):
         self.stream_info_interval = interval
         self.set_event_callback('stream_info', callback)
-        self.start_thread('stream_info')
-        
-##############################################################################
+        self.start_thread('stream_info', channel)
 
-### Auxiliary object functions ###############################################
+    ##############################################################################
+
+    ### Auxiliary object functions ###############################################
 
     def set_event_callback(self, kind, callback):
         if not kind in self.data:
@@ -452,7 +372,7 @@ class PyWitch:
 
     def get_user_info(self, user_id=None, login=None, wait_for_response=True):
         if user_id:
-            user_id=str(user_id)
+            user_id = str(user_id)
         if login:
             user_id = self.users_login.get(login)
         default = {
@@ -463,19 +383,19 @@ class PyWitch:
         if not user_id in self.users:
             request_thread = threading.Thread(
                 target=self.request_user_info,
-                kwargs={'user_id': user_id, 'login': login}
+                kwargs={'user_id': user_id, 'login': login},
             )
             request_thread.start()
             if wait_for_response:
                 request_thread.join()
                 if login:
                     user_id = self.users_login.get(login)
-            
-        return self.users.get(user_id, default)
 
+        return self.users.get(user_id, default)
 
     def log(self, msg, level=1):
         if self.verbose >= level:
             print(f'(PyWitch) {msg}')
-            
+
+
 ##############################################################################
