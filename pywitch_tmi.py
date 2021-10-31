@@ -1,10 +1,13 @@
 from websocket import create_connection
 import time
-import json
-import random
-import requests
 import threading
-import time
+
+from .pywitch_functions import (
+    validate_token,
+    validate_callback,
+    get_user_info,
+    pywitch_log,
+)
 
 
 def get_display_name(string):
@@ -29,24 +32,32 @@ def get_privmsg(string):
         return ''
 
 
-class TMI:
-    def __init__(self, pywitch, channel, callback=None):
-        self.pywitch = pywitch
-        self.token = pywitch.token
-        self.login = pywitch.user['login']
+class PyWitchTMI:
+    def __init__(
+        self, channel, token=None, callback=None, users={}, verbose=True
+    ):
         self.channel = channel
+        self.token = token
         self.callback = callback
+        self.users = users
+        self.verbose = verbose
 
-        self.validate_callback()
+        validate_callback(callback)
+        self.validation, self.helix_headers = validate_token(
+            self.token, self.verbose
+        )
 
-        self.kind = 'tmi'
+        self.user_data = get_user_info(
+            user_id=self.validation['user_id'],
+            helix_headers=self.helix_headers,
+        )
+        self.users[self.user_data['user_id']] = self.user_data
+
+        self.login = self.user_data['login']
+
         self.websocket = None
         self.is_running = False
         self.is_connected = False
-
-    def validate_callback(self):
-        if not callable(self.callback) and self.callback != None:
-            raise Exception("Provided callback is not callable! Terminating.")
 
     def connect(self):
         try:
@@ -74,8 +85,8 @@ class TMI:
                 display_name = get_display_name(event)
                 user_id = get_user_id(event)
                 login = get_login(event)
-                if not user_id in self.pywitch.users:
-                    self.pywitch.users[user_id] = {
+                if not user_id in self.users:
+                    self.users[user_id] = {
                         'user_id': user_id,
                         'display_name': display_name,
                         'login': login,
@@ -95,7 +106,7 @@ class TMI:
             print(e)
             return
 
-    def start_thread(self):
+    def start(self):
         self.thread = threading.Thread(target=self.keep_alive, args=())
         self.is_running = True
         self.thread.start()
@@ -106,4 +117,12 @@ class TMI:
             self.event_listener()
 
     def send(self, message):
-        self.websocket.send('PRIVMSG #{self.channel} :{message}')
+        if not self.is_running:
+            pywitch_log(
+                'TMI not connected! Please first execute "start" function.',
+                self.verbose,
+            )
+            return
+        while not (hasattr(self, 'websocket') and self.is_connected):
+            time.sleep(0.1)
+        self.websocket.send(f'PRIVMSG #{self.channel} :{message}')
