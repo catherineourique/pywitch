@@ -32,7 +32,6 @@ class PyWitchHeat:
         self.login = self.user_data['login']
         self.user_id = self.user_data['user_id']
 
-        self.kind = 'redemptions'
         self.websocket = None
         self.is_running = False
         self.is_connected = False
