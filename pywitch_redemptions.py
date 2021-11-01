@@ -117,9 +117,17 @@ class PyWitchRedemptions:
             return None
 
     def start(self):
+        if self.is_running:
+            self.stop()
         self.thread = threading.Thread(target=self.keep_alive, args=())
         self.is_running = True
         self.thread.start()
+        
+    def stop(self):
+        self.is_running = False
+        self.is_connected = False
+        self.websocket.close()
+        self.websocket = None
 
     def keep_alive(self):
         while self.is_running:
