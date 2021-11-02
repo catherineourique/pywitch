@@ -46,7 +46,7 @@ def callback(data):
     print(data)
 
 token = 'YOUR_TOKEN'
-channel = 'YOUR_CHANNEL'
+channel = 'TARGET_CHANNEL'
 users = {} # Shared user list minimzes the number of requests
 
 streaminfo = PyWitchStreamInfo(
@@ -86,7 +86,7 @@ def callback(data):
     print(data)
 
 token = 'YOUR_TOKEN'
-channel = 'YOUR_CHANNEL'
+channel = 'TARGET_CHANNEL'
 users = {} # Shared user list minimzes the number of requests
 
 tmi = PyWitchTMI(
@@ -155,12 +155,60 @@ following keys:
 
 Event time is given by `time.time()`.
 
+## PyWitchHeat ##
+
+PyWitchHeat is a class that reads from Heat Extension websocket.
+
+[Heat Extension allows you to capture the users click on screen, you can find more information about it in this URL: https://heat.j38.net/about/](https://heat.j38.net/about/)
+
+Use:
+
+```
+from pywitch import PyWitchHeat, run_forever
+
+def callback(data):
+    print(data)
+
+token = 'YOUR_TOKEN'
+chanel = 'TARGET_CHANNEL
+users = {} # Shared user list minimzes the number of requests
+
+heat = PyWitchHeat(
+    token = token,
+    callback = callback, # Optional
+    users = users,       # Optional, but strongly recomended
+    verbose = True,      # Optional
+)
+heat.start()
+run_forever()
+```
+
+Since Heat only returns user_id, every new user that click on screen execute
+a request on Twitch API to recover its user display_name and login.
+Using shared user lists minimizes the number of requests drastically.
+
+For users that don't authorize the Heat Extension to read the user id, it will
+only return the opaque user id.
+
+It automatically validate the provided token. 
+
+The `data` parameter in the callback function is a dictionary with the
+following keys:
+```
+['type', 'message', 'user_id', 'event_raw', 'event_time', 'x', 'y', 'login',
+ 'display_name']
+```
+
+Event time is given by `time.time()`.
+
 ### Token Generation ###
 
 To generate token, you need to authenticate PyWitch application in the
 following URL:
 
+```
 https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=l2o6fudb8tq6394phgudstdzlouo9n&redirect_uri=https://localhost&scope=channel:manage:redemptions%20channel:read:redemptions%20user:read:email%20chat:edit%20chat:read
+```
 
 NOTE: This URL will provide the following scopes to PyWitch application:
 
@@ -171,14 +219,16 @@ It will ask for you to login in your Twitch Account to authorize. After
 authorizing it, it will redirect to an (usually) broken page. The only thing
 you need from the page is its URL. Copy that URL, it should look like this:
 
+```
 https://localhost/#access_token=YOUR_ACCESS_TOKEN&scope=channel%3Amanage%3Aredemptions+channel%3Aread%3Aredemptions+user%3Aread%3Aemail+chat%3Aedit+chat%3Aread&token_type=bearer
+```
 
 Your token is what is filling YOUR_ACCESS_TOKEN from the URL. 
 
 Alternatively, you can create a Twitch Application in the
 following URL:
 
-https://dev.twitch.tv
+[https://dev.twitch.tv](https://dev.twitch.tv)
 
 To do so, first login with your Twitch Account, click "Your Console", then 
 "Applications" and "Register Your Application".
