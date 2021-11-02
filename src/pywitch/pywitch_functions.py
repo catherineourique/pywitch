@@ -15,7 +15,7 @@ get_token_url = (
 )
 
 response_token_url = (
-    'https://localhost:13486/#access_token=YOUR_ACCESS_TOKEN&'
+    'https://localhost/#access_token=YOUR_ACCESS_TOKEN&'
     'scope=channel%3Amanage%3Aredemptions+channel%3Aread%3Aredemptions+user%'
     '3Aread%3Aemail+chat%3Aedit+chat%3Aread&token_type=bearer'
 )
