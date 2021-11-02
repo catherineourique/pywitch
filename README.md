@@ -19,7 +19,63 @@ The functionalities included are:
 
 * Heat (heat extension).
 
-## Token Generation ##
+## Token Validation ##
+
+To validate your token, you can use the following function:
+
+```
+from pywitch import validate_token
+
+token = 'YOUR_TOKEN'
+validation, helix_headers = validate_token(token)
+```
+
+Where `validation` is a dictionary with token validation information and
+`helix_headers` contains the headers necessary for requests into Twitch API.
+
+## PyWitchStreamInfo ##
+
+PyWitchStreamInfo is a class that request stream information from Twitch API
+and everytime the response changes, a predefined funcion is called (callback).
+
+Use:
+```
+from pywitch import PyWitchStreamInfo, run_forever
+
+def callback(data):
+    print(data)
+
+token = 'YOUR_TOKEN'
+channel = 'YOUR_CHANNEL'
+users = {} # Shared user list minimzes the number of requests
+
+streaminfo = PyWitchStreamInfo(
+    channel = channel,
+    channel = token,
+    callback = callback, # Optional
+    users = users,       # Optional, but strongly recomended
+    interval = 1,        # Optional
+    verbose = True,      # Optional
+)
+streaminfo.start()
+run_forever()
+```
+
+It automatically validate the provided token. 
+
+The `data` parameter in the callback function is a dictionary with the
+following keys:
+```
+['id', 'user_id', 'user_login', 'user_name', 'game_id', 'game_name',
+ 'type', 'title', 'viewer_count', 'started_at', 'language', 'thumbnail_url',
+ 'tag_ids', 'is_mature']
+```
+
+## PyWitchTMI ##
+
+PyWitchTMI is a class that manages the connecton
+
+### Token Generation ###
 
 To generate token, you need to authenticate PyWitch application in the
 following URL:
