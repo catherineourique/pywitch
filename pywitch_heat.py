@@ -29,6 +29,17 @@ class PyWitchHeat:
         )
         self.users[self.user_data['user_id']] = self.user_data
 
+        self.channel_data = get_user_info(
+            login=self.channel,
+            helix_headers=self.helix_headers,
+        )
+        if not self.channel_data['user_id']:
+            raise Exception(
+                f"{self.channel} is not a valid channel for Heat Extension"
+            )
+
+        self.users[self.channel_data['user_id']] = self.channel_data
+
         self.login = self.user_data['login']
         self.user_id = self.user_data['user_id']
 

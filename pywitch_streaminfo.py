@@ -42,6 +42,8 @@ class PyWitchStreamInfo:
                 f"{self.channel} is not a valid channel for StreamInfo"
             )
 
+        self.users[self.channel_data['user_id']] = self.channel_data
+
         self.login = self.user_data['login']
         self.user_id = self.user_data['user_id']
 
