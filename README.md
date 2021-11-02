@@ -1,7 +1,5 @@
 # PyWitch
-![pywitch_logo](logo/pywitch_logo.png) (note: PyWitch logo is a combination of Twitch Logo and the snakes heads in
-Python logo. It is not associated with anything besides that. A friend of
-mine told me it resembles another logo, but this is pure coincidence.)
+![pywitch_logo](logo/pywitch_logo.png)
 
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 
