@@ -211,7 +211,7 @@ following keys:
 
 Event time is given by `time.time()`.
 
-### Token Generation ###
+## Token Generation ##
 
 To generate token, you need to authenticate PyWitch application in the
 following URL:
