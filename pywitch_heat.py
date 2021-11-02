@@ -44,6 +44,11 @@ class PyWitchHeat:
             )
             self.is_connected = True
         except Exception as e:
+            if e.status_code == 404:
+                raise Exception(
+                    f"{self.channel} is not a valid channel"
+                    " for Heat Extension"
+                )
             print(e)
             return None
 

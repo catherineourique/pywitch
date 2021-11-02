@@ -1,4 +1,4 @@
-![PyWitch](logo/pywitch_logo.png)
-
 # PyWitch
-Connect to Twitch using Python requests and websocket!
+![pywitch_logo](logo/pywitch_logo.png)
+
+Connect to Twitch using Python, requests and websockets!

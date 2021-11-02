@@ -36,6 +36,12 @@ class PyWitchRedemptions:
             user_id=self.validation['user_id'],
             helix_headers=self.helix_headers,
         )
+
+        if not self.user_data['user_id']:
+            raise Exception(
+                f"Provided token is not valid for channel Redemptions"
+            )
+
         self.users[self.user_data['user_id']] = self.user_data
 
         self.login = self.user_data['login']
