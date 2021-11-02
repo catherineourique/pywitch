@@ -1,3 +1,8 @@
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = 'unknown'
+
 from .pywitch_tmi import PyWitchTMI
 from .pywitch_heat import PyWitchHeat
 from .pywitch_streaminfo import PyWitchStreamInfo

@@ -78,7 +78,7 @@ class PyWitchHeat:
                     'type': event_data.get('type'),
                     'user_id': event_user,
                     'event_raw': event,
-                    'event_time': time.time()
+                    'event_time': time.time(),
                 }
 
                 try:
@@ -92,10 +92,10 @@ class PyWitchHeat:
                 if event_user in self.users:
                     self.data.update(self.users[event_user])
                 elif event_user.isdigit():
-                    self.users[event_user]={
+                    self.users[event_user] = {
                         'user_id': event_user,
                         'display_name': '',
-                        'login': '', 
+                        'login': '',
                     }
                     request = threading.Thread(
                         target=self.request_user_info, args=(event_user,)
