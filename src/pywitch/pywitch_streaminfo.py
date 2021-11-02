@@ -64,11 +64,13 @@ class PyWitchStreamInfo:
                     data = response.json()
                     data = data.get('data', [])
                     data = data and data[0] or {}
-                    if self.data == data:
+                    if not data or self.data == data:
                         return
                     self.data = data
                     if self.callback:
-                        self.callback(self.data)
+                        tdata = self.data.copy()
+                        tdata['event_time'] = time.time()
+                        self.callback(tdata)
                 time.sleep(self.interval)
         except Exception as e:
             print(e)

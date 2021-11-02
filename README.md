@@ -36,7 +36,7 @@ Where `validation` is a dictionary with token validation information and
 ## PyWitchStreamInfo ##
 
 PyWitchStreamInfo is a class that request stream information from Twitch API
-and everytime the response changes, a predefined funcion is called (callback).
+and everytime the response changes, a predefined function is called (callback).
 
 Use:
 ```
@@ -51,7 +51,7 @@ users = {} # Shared user list minimzes the number of requests
 
 streaminfo = PyWitchStreamInfo(
     channel = channel,
-    channel = token,
+    token = token,
     callback = callback, # Optional
     users = users,       # Optional, but strongly recomended
     interval = 1,        # Optional
@@ -68,12 +68,92 @@ following keys:
 ```
 ['id', 'user_id', 'user_login', 'user_name', 'game_id', 'game_name',
  'type', 'title', 'viewer_count', 'started_at', 'language', 'thumbnail_url',
- 'tag_ids', 'is_mature']
+ 'tag_ids', 'is_mature', 'event_time']
 ```
 
 ## PyWitchTMI ##
 
-PyWitchTMI is a class that manages the connecton
+PyWitchTMI is a class that manages the connection with TMI using websockets.
+With this class, messages sent to Twitch chat calls a predefined funcion. It
+can also send messages to chat using the account associated account.
+
+Use:
+
+```
+from pywitch import PyWitchTMI, run_forever
+
+def callback(data):
+    print(data)
+
+token = 'YOUR_TOKEN'
+channel = 'YOUR_CHANNEL'
+users = {} # Shared user list minimzes the number of requests
+
+tmi = PyWitchTMI(
+    channel = channel,
+    token = token,
+    callback = callback, # Optional
+    users = users,       # Optional, but strongly recomended
+    verbose = True,      # Optional
+)
+tmi.start()
+tmi.send('PyWitch send a message!')
+run_forever()
+```
+
+Note: The channel don't need to be the same as the one that provided the
+token.
+
+It automatically validate the provided token. 
+
+The `data` parameter in the callback function is a dictionary with the
+following keys:
+```
+['display_name', 'event_time', 'user_id', 'login', 'message', 'event_raw']
+```
+
+Event time is given by `time.time()`.
+
+## PyWitchRedemptions ##
+
+PyWitchRedemptions is a class that reads the user chat redemptions.
+With this class, users chat redemptions calls a predefined funcion.
+
+Use:
+
+```
+from pywitch import PyWitchRedemptions, run_forever
+
+def callback(data):
+    print(data)
+
+token = 'YOUR_TOKEN'
+users = {} # Shared user list minimzes the number of requests
+
+redemptions = PyWitchRedemptions(
+    token = token,
+    callback = callback, # Optional
+    users = users,       # Optional, but strongly recomended
+    verbose = True,      # Optional
+)
+redemptions.start()
+run_forever()
+```
+
+Note: Due to Twitch limitations, the provided token need to be generated with
+the broadcaster user.
+
+It automatically validate the provided token. 
+
+The `data` parameter in the callback function is a dictionary with the
+following keys:
+```
+['type', 'data', 'login', 'user_id', 'display_name', 'title', 'prompt',
+ 'cost', 'user_input', 'cooldown', 'message', 'event_dict', 'event_time',
+ 'event_raw']
+```
+
+Event time is given by `time.time()`.
 
 ### Token Generation ###
 
