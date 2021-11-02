@@ -59,12 +59,18 @@ class PyWitchHeat:
                 self.data = {
                     'type': event_data.get('type'),
                     'message': event_data.get('message'),
-                    'x': event_data.get('x'),
-                    'y': event_data.get('y'),
                     'type': event_data.get('type'),
                     'user_id': event_user,
                     'event_raw': event,
                 }
+
+                try:
+                    x = float(event_data.get('x', 0))
+                    y = float(event_data.get('y', 0))
+                    self.data['x'] = x
+                    self.data['y'] = y
+                except:
+                    continue
 
                 if event_user in self.users:
                     self.data.update(self.users[event_user])
@@ -86,7 +92,7 @@ class PyWitchHeat:
         self.thread = threading.Thread(target=self.keep_alive, args=())
         self.is_running = True
         self.thread.start()
-        
+
     def stop(self):
         self.is_running = False
         self.is_connected = False

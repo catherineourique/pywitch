@@ -112,7 +112,7 @@ class PyWitchTMI:
         self.thread = threading.Thread(target=self.keep_alive, args=())
         self.is_running = True
         self.thread.start()
-        
+
     def stop(self):
         self.is_running = False
         self.is_connected = False

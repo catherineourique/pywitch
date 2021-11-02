@@ -71,6 +71,8 @@ class PyWitchRedemptions:
                 event_json = json_eval(event)
                 event_time = time.time()
                 event_data = event_json.get('data', {})
+                if not event_data:
+                    continue
                 event_message = json_eval(event_data.get('message', ''))
                 event_msgdata = event_message.get('data', {})
                 event_redemption = event_msgdata.get('redemption', {})
@@ -122,7 +124,7 @@ class PyWitchRedemptions:
         self.thread = threading.Thread(target=self.keep_alive, args=())
         self.is_running = True
         self.thread.start()
-        
+
     def stop(self):
         self.is_running = False
         self.is_connected = False

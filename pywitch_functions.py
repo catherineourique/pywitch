@@ -1,9 +1,6 @@
 import time
 import json
-import random
 import requests
-import threading
-import time
 
 __validate_token_url__ = 'https://id.twitch.tv/oauth2/validate'
 __pywitch_client_id__ = 'l2o6fudb8tq6394phgudstdzlouo9n'
@@ -18,7 +15,7 @@ get_token_url = (
 )
 
 response_token_url = (
-    'https://localhost/#access_token=YOUR_ACCESS_TOKEN&'
+    'https://localhost:13486/#access_token=YOUR_ACCESS_TOKEN&'
     'scope=channel%3Amanage%3Aredemptions+channel%3Aread%3Aredemptions+user%'
     '3Aread%3Aemail+chat%3Aedit+chat%3Aread&token_type=bearer'
 )
@@ -123,3 +120,8 @@ def get_user_info(user_id=None, login=None, helix_headers={}):
             'display_name': response_display_name,
         }
     return {}
+
+
+def run_forever():
+    while True:
+        time.sleep(60)
