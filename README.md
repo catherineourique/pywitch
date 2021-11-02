@@ -1,22 +1,25 @@
 # PyWitch
-![pywitch_logo](logo/pywitch_logo.png)
+![pywitch_logo](logo/pywitch_logo.png) (note: PyWitch logo is a combination of Twitch Logo and the snakes heads in
+Python logo. It is not associated with anything besides that. A friend of
+mine told me it resembles another logo, but this is pure coincidence.)
 
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+
 
 PyWitch is a library that integrate Twitch with Python using requests and
 websockets.
 
 The functionalities included are: 
 
-⋅⋅* Token Validation;
+* Token Validation;
 
-⋅⋅* StreamInfo (real time stream information);
+* StreamInfo (real time stream information);
 
-⋅⋅* TMI (twitch Messaging Interface);
+* TMI (twitch Messaging Interface);
 
-⋅⋅* Redemptions (chat redemptions and rewards);
+* Redemptions (chat redemptions and rewards);
 
-⋅⋅* Heat (heat extension).
+* Heat (heat extension).
 
 ## Token Generation ##
 
