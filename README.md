@@ -19,6 +19,16 @@ The functionalities included are:
 
 * Heat (heat extension).
 
+## Requirements ##
+
+Tested in Python 3.7
+
+Libraries:
+```
+requests>=2.26.0
+websocket-client>=1.2.1
+```
+
 ## Token Validation ##
 
 To validate your token, you can use the following function:
@@ -238,5 +248,5 @@ set Category to any of the given options.
 
 After that, your application will receive an "Client ID", keep that in hands.
 
-Now you need to access the following URL, replacing 'l2o6fudb8tq6394phgudstdzlouo9n'
+Now you need to access the following URL, replacing `l2o6fudb8tq6394phgudstdzlouo9n`
 with your application client_id:
