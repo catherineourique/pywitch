@@ -64,6 +64,7 @@ class PyWitchTMI:
 
         self.login = self.user_data['login']
 
+        self.thread = None
         self.websocket = None
         self.is_running = False
         self.is_connected = False
@@ -127,6 +128,10 @@ class PyWitchTMI:
         self.is_connected = False
         self.websocket.close()
         self.websocket = None
+        if self.thread:
+            self.thread.join()
+            self.thread = None
+
 
     def keep_alive(self):
         while self.is_running:

@@ -47,6 +47,7 @@ class PyWitchRedemptions:
         self.login = self.user_data['login']
         self.user_id = self.user_data['user_id']
 
+        self.thread = None
         self.websocket = None
         self.is_running = False
         self.is_connected = False
@@ -136,6 +137,10 @@ class PyWitchRedemptions:
         self.is_connected = False
         self.websocket.close()
         self.websocket = None
+        if self.thread:
+            self.thread.join()
+            self.thread = None
+
 
     def keep_alive(self):
         while self.is_running:
