@@ -169,7 +169,7 @@ Event time is given by `time.time()`.
 
 PyWitchHeat is a class that reads from Heat Extension websocket.
 
-[Heat Extension allows you to capture the users click on screen, you can find more information about it in this URL: https://heat.j38.net/about/](https://heat.j38.net/about/)
+[Heat Extension made by Scott Garner that allows you to capture the users click on screen, you can find more information about it in this URL: https://heat.j38.net/about/](https://heat.j38.net/about/)
 
 Use:
 
